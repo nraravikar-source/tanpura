@@ -50,7 +50,23 @@
   header h1 { margin: 0; font-size: 19px; font-weight: 600; }
   header p { margin: 4px 0 0; color: var(--text-secondary); max-width: 980px; }
   .layout { display: grid; grid-template-columns: 400px 1fr; gap: 16px; padding: 8px 20px 24px; }
-  @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+  .layout > div { min-width: 0; }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .layout > .outputs { order: -1; }                 /* results + Render button first on narrow screens */
+    .actionbar { position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+  }
+  @media (max-width: 600px) {
+    header { padding: 12px 12px 6px; }
+    header p { font-size: 12.5px; }
+    .layout { padding: 6px 10px 20px; gap: 10px; }
+    .panel { padding: 10px; }
+    .row { grid-template-columns: 1fr 112px; }
+    button { padding: 8px 12px; }                     /* bigger touch targets */
+    .buttons { gap: 6px; }
+    .progress { flex-basis: 100%; }
+  }
   .panel {
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
     padding: 12px 14px; margin-bottom: 12px;
@@ -160,14 +176,14 @@
 
     <div class="panel">
       <h2>Strings</h2>
-      <table class="strings">
+      <div class="scroll"><table class="strings">
         <thead><tr><th></th><th>Material</th><th>⌀ mm</th><th>ΔT %</th><th>Gain</th></tr></thead>
         <tbody id="stringRows"></tbody>
-      </table>
-      <table style="margin-top:8px">
+      </table></div>
+      <div class="scroll"><table style="margin-top:8px">
         <thead><tr><th>String</th><th>f (Hz)</th><th>μ (g/m)</th><th>T (N)</th><th>% break</th><th>B</th></tr></thead>
         <tbody id="physRows"></tbody>
-      </table>
+      </table></div>
       <p class="hint">Tension is the value needed to reach the selected pitch (T = μ(2Lf)²). ΔT changes it, which detunes the string (f ∝ √T) and changes the inharmonicity B = π³Ed⁴ / (64TL²). Small ΔT differences between the two Sa strings give the natural beating.</p>
       <div class="row"><label>Young's modulus override (GPa)</label><input type="number" id="Eover" value="" placeholder="from material" step="5"></div>
       <div class="row"><label>Max dispersion all-pass sections</label><input type="number" id="dispM" value="64" min="0" max="96" step="1"></div>
@@ -234,8 +250,8 @@
   </div>
 
   <!-- ================= OUTPUT ================= -->
-  <div>
-    <div class="panel">
+  <div class="outputs">
+    <div class="panel actionbar">
       <div class="buttons">
         <button class="primary" id="btnRender">Render &amp; play</button>
         <button id="btnPlay" disabled>Play</button>
@@ -271,14 +287,14 @@
     <div class="panel">
       <details id="tableDetails" open>
         <summary>Harmonic table: harmonics of low Sa (peak level within ±2.5%)</summary>
-        <div id="harmTable" style="margin-top:8px"></div>
+        <div id="harmTable" class="scroll" style="margin-top:8px"></div>
       </details>
     </div>
 
     <div class="panel">
       <details>
         <summary>Model details per string (last render)</summary>
-        <div id="modelInfo" style="margin-top:8px"></div>
+        <div id="modelInfo" class="scroll" style="margin-top:8px"></div>
       </details>
     </div>
   </div>
@@ -646,41 +662,71 @@ function runRender(P) {
 }
 
 // ---------- audio ----------
-let actx = null, src = null, startedAt = 0, current = null, reference = null;
-function ensureCtx() { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); return actx; }
-function stop() { if (src) { try { src.stop(); } catch (e) {} src = null; } $('btnPlay').textContent = 'Play'; $('playhead').style.display = 'none'; }
-function play() {
-  if (!current) return;
-  const ctx = ensureCtx(); stop();
-  const buf = ctx.createBuffer(1, current.audio.length, current.fs);
-  buf.copyToChannel(current.audio, 0);
-  src = ctx.createBufferSource(); src.buffer = buf; src.loop = $('loop').checked;
-  src.connect(ctx.destination); src.start(); startedAt = ctx.currentTime;
-  src.onended = () => { if (!src || !src.loop) stop(); };
-  $('btnPlay').textContent = 'Stop';
+// Playback uses an HTML <audio> element (not Web Audio) so that iPhones/iPads play
+// sound even with the silent switch on, and so that playback started after an
+// asynchronous render is allowed (the element is "unlocked" during the user's tap).
+let current = null, reference = null, wavUrl = null, unlocked = false;
+const player = new Audio();
+player.preload = 'auto'; player.setAttribute('playsinline', ''); player.setAttribute('webkit-playsinline', '');
+function encodeWav(a, fs) {
+  const n = a.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, fs, true); v.setUint32(28, fs * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, a[i])) * 32767, true);
+  return new Blob([buf], { type: 'audio/wav' });
+}
+const SILENT_URL = URL.createObjectURL(encodeWav(new Float32Array(4800), 48000));
+function unlockAudio() {
+  // Must be called synchronously inside a tap/click handler.
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  if (unlocked) return;
+  unlocked = true;
+  player.src = SILENT_URL;
+  const pr = player.play();
+  if (pr && pr.then) pr.then(() => { if (player.src === SILENT_URL) player.pause(); }).catch(() => { unlocked = false; });
+}
+function setButton() { $('btnPlay').textContent = player.paused ? 'Play' : 'Stop'; }
+function stop() { player.pause(); setButton(); $('playhead').style.display = 'none'; }
+function play(fromStart = true) {
+  if (!current || !wavUrl) return;
+  if (player.src !== wavUrl) player.src = wavUrl;
+  player.loop = $('loop').checked;
+  if (fromStart) { try { player.currentTime = 0; } catch (e) {} }
+  const pr = player.play();
+  if (pr && pr.catch) pr.catch(() => {
+    $('status').textContent += ' · Tap Play to listen.';
+    setButton();
+  });
+  setButton();
   requestAnimationFrame(tickPlayhead);
 }
+player.addEventListener('play', () => { setButton(); requestAnimationFrame(tickPlayhead); });
+player.addEventListener('pause', setButton);
+player.addEventListener('ended', stop);
 function tickPlayhead() {
-  if (!src || !current) return;
-  const dur = current.audio.length / current.fs;
-  let t = actx.currentTime - startedAt; if (src.loop) t %= dur;
-  if (t > dur) return;
+  if (player.paused || !current || player.src !== wavUrl) { $('playhead').style.display = 'none'; return; }
+  const dur = current.audio.length / current.fs, t = Math.min(player.currentTime, dur);
   const ph = $('playhead'), w = $('sg').clientWidth, pad = SG_PAD;
   ph.style.display = 'block'; ph.style.left = (pad.l + (w - pad.l - pad.r) * t / dur) + 'px';
   requestAnimationFrame(tickPlayhead);
 }
-$('btnPlay').onclick = () => src ? stop() : play();
-$('loop').onchange = () => { if (src) src.loop = $('loop').checked; };
+$('btnPlay').onclick = () => { unlockAudio(); player.paused || player.src !== wavUrl ? play(true) : stop(); };
+$('loop').onchange = () => { player.loop = $('loop').checked; };
 
 $('btnRender').onclick = async () => {
   const P = gather();
   if (!P.strings.some(s => s.enabled)) { $('status').textContent = 'Enable at least one string.'; return; }
-  ensureCtx(); stop();
+  unlockAudio(); stop();
   $('btnRender').disabled = true; $('prog').style.width = '0%';
   $('status').textContent = `Rendering ${P.duration}s at ${P.fs * P.os} Hz internal rate…`;
   try {
     const r = await runRender(P);
     current = { ...r, P, label: describe(P) };
+    if (wavUrl) URL.revokeObjectURL(wavUrl);
+    wavUrl = URL.createObjectURL(encodeWav(r.audio, r.fs));
     analyse(current);
     $('status').textContent = `Rendered in ${(r.ms / 1000).toFixed(2)} s · ${describe(P)}`;
     ['btnPlay', 'btnWav', 'btnRef'].forEach(id => $(id).disabled = false);
@@ -701,18 +747,10 @@ function showInfo(info) {
 }
 
 $('btnWav').onclick = () => {
-  if (!current) return;
-  const a = current.audio, n = a.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
-  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
-  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, current.fs, true); v.setUint32(28, current.fs * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-  w(36, 'data'); v.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, a[i])) * 32767, true);
-  const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-  const el = document.createElement('a'); el.href = url;
+  if (!current || !wavUrl) return;
+  const el = document.createElement('a'); el.href = wavUrl;
   el.download = `tanpura_${NOTES[+$('pc').value].replace('#', 's')}${$('oct').value}_${current.P.gourd}.wav`;
-  el.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+  document.body.appendChild(el); el.click(); el.remove();
 };
 $('btnRef').onclick = () => { reference = { spec: current.spec, label: current.label, base: current.base }; $('btnClearRef').disabled = false; drawAll(); };
 $('btnClearRef').onclick = () => { reference = null; $('btnClearRef').disabled = true; drawAll(); };
@@ -774,7 +812,9 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const SPEC_PAD = { l: 48, r: 14, t: 26, b: 34 }, SG_PAD = { l: 48, r: 14, t: 8, b: 30 };
 const SPEC_F = [30, 16000], SG_F = [50, 8000];
 function setupCanvas(cv) {
-  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = +cv.getAttribute('height');
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth;
+  if (!cv.dataset.h) cv.dataset.h = cv.getAttribute('height');   // CSS height, read once (cv.height is overwritten below)
+  const h = +cv.dataset.h;
   cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px';
   const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { ctx, w, h };
@@ -816,10 +856,12 @@ function drawSpectrum() {
   // harmonic ticks
   const base = (current || reference) ? (current || reference).base : saFreq() / 2;
   ctx.strokeStyle = css('--axis'); ctx.fillStyle = css('--text-muted'); ctx.textBaseline = 'bottom';
+  let lastLabel = -1e9;
   for (let n = 1; n * base <= SPEC_F[1]; n++) {
     const x = Math.round(fx(n * base)) + 0.5; if (x < pad.l) continue;
     ctx.beginPath(); ctx.moveTo(x, pad.t - 6); ctx.lineTo(x, pad.t); ctx.stroke();
-    if (n <= 8 || n === 12 || n === 16 || n === 24 || n === 32 || n === 48 || n === 64) ctx.fillText(n, x, pad.t - 8);
+    const want = n <= 8 || n === 12 || n === 16 || n === 24 || n === 32 || n === 48 || n === 64;
+    if (want && x - lastLabel >= 18) { ctx.fillText(n, x, pad.t - 8); lastLabel = x; }   // skip labels that would overlap
   }
   // series: per-pixel max envelope so dense high-frequency bins don't alias
   const drawSeries = (s, color, dash) => {
