@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tanpura Waveguide Synthesizer</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3f0;
+    --surface-1: #fcfcfb;
+    --surface-2: #ffffff;
+    --border: #dddcd6;
+    --grid: #ebeae5;
+    --axis: #b9b8b0;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #77766f;
+    --accent: #2a78d6;
+    --series-1: #2a78d6;   /* current render */
+    --series-2: #eb6834;   /* reference */
+    --critical: #d03b3b;
+    --good: #0ca30c;
+    --seq: #cde2fb,#9ec5f4,#6da7ec,#3987e5,#256abf,#184f95,#0d366b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-0: #121211;
+      --surface-1: #1a1a19;
+      --surface-2: #222220;
+      --border: #383835;
+      --grid: #2a2a28;
+      --axis: #57564f;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --accent: #3987e5;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --seq: #104281,#184f95,#256abf,#3987e5,#6da7ec,#9ec5f4,#cde2fb;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--surface-0); color: var(--text-primary);
+  }
+  header { padding: 14px 20px 8px; }
+  header h1 { margin: 0; font-size: 19px; font-weight: 600; }
+  header p { margin: 4px 0 0; color: var(--text-secondary); max-width: 980px; }
+  .layout { display: grid; grid-template-columns: 400px 1fr; gap: 16px; padding: 8px 20px 24px; }
+  @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 12px;
+  }
+  .panel h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+  .row { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 8px; margin: 5px 0; }
+  .row label { color: var(--text-secondary); }
+  .row .val { font-variant-numeric: tabular-nums; color: var(--text-muted); font-size: 12px; }
+  input[type=number], select {
+    width: 100%; padding: 4px 6px; font: inherit; color: var(--text-primary);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px;
+  }
+  input[type=range] { width: 100%; }
+  .rangewrap { display: grid; grid-template-columns: 1fr 52px; gap: 6px; align-items: center; }
+  .hint { color: var(--text-muted); font-size: 11.5px; margin: 4px 0 0; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 3px 4px; text-align: left; border-bottom: 1px solid var(--grid); }
+  th { color: var(--text-secondary); font-weight: 500; font-size: 12px; }
+  .strings td input, .strings td select { padding: 2px 4px; }
+  .strings td:nth-child(2) { width: 84px; } .strings td:nth-child(3), .strings td:nth-child(4), .strings td:nth-child(5) { width: 62px; }
+  .strings td:first-child label { white-space: nowrap; }
+  .warn { color: var(--critical); font-weight: 600; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    font: inherit; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .progress { flex: 1; min-width: 120px; height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .1s; }
+  .status { color: var(--text-secondary); font-size: 12px; }
+  .about { margin: 8px 0 0; max-width: 980px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+  .about summary { font-weight: 600; color: var(--text-primary); }
+  .about div { color: var(--text-secondary); }
+  .about ol { margin: 4px 0 8px; padding-left: 20px; }
+  .about p { margin: 8px 0; }
+  .chart { position: relative; }
+  .chart canvas { display: block; width: 100%; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 2px 0 6px; min-height: 18px; }
+  .legend span::before { content: ""; display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; background: var(--c); }
+  .legend .dashed::before { background: repeating-linear-gradient(90deg, var(--c) 0 4px, transparent 4px 7px); }
+  .tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.15); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .tooltip .k { color: var(--text-muted); }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--critical); display: none; pointer-events: none; }
+  details summary { cursor: pointer; color: var(--text-secondary); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .chk { display: flex; gap: 6px; align-items: center; color: var(--text-secondary); }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tanpura Waveguide Synthesizer</h1>
+  <p>A digital-waveguide model of four stiff strings. Each string has a distributed one-sided contact barrier (the jawari bridge with its thread), a frequency-dependent loss filter, a dispersion all-pass for bending stiffness, and a modal resonator bank for the gourd body. The output is rendered offline at an oversampled rate and played back, with an averaged spectrum, a spectrogram and a harmonic table.</p>
+  <details class="about">
+    <summary>About this app &amp; how to use it</summary>
+    <div>
+      <p><b>What it is.</b> A physics-based tanpura simulator. Nothing is sampled: the sound is computed from the strings' material, thickness and tension, the shape of the jawari bridge and thread, and the resonances of the gourd. Everything runs in your browser. Nothing is uploaded and no data is collected.</p>
+      <p><b>Quick start.</b></p>
+      <ol>
+        <li>Choose a <b>Preset</b> or set <b>Sa</b> (pitch) and octave in the left panel.</li>
+        <li>Click <b>Render &amp; play</b>. A 12-second drone is computed in a few seconds and starts playing. Tick <b>Loop</b> for a continuous drone.</li>
+        <li>Change something (for example the thread position, the gourd type, or untick the jawari), then render again to hear the difference.</li>
+        <li>To compare two settings, click <b>Save as reference</b> before changing anything. The saved spectrum stays on the chart as a dashed line, and the harmonic table shows the difference in dB.</li>
+        <li><b>Download WAV</b> saves the sound to use elsewhere.</li>
+      </ol>
+      <p><b>Good things to try.</b> Move the <b>thread position</b> in small steps (18, 19, 20 mm) and listen to the buzz open and close. Compare <b>Traditional gourd</b>, <b>Fiberglass gourd</b> and <b>Gourd removed</b>. Untick <b>Enable jawari</b> to hear a plain string drone.</p>
+      <p><b>Tips.</b> On a phone or an older computer, set <b>Oversampling</b> to 2× for faster renders. On an iPhone, turn the silent switch off or you will hear nothing. The body resonances are illustrative, not measurements of a particular instrument.</p>
+    </div>
+  </details>
+</header>
+
+<div class="layout">
+  <!-- ================= CONTROLS ================= -->
+  <div>
+    <div class="panel">
+      <h2>Instrument &amp; tuning</h2>
+      <div class="row"><label>Preset</label>
+        <select id="preset">
+          <option value="custom">— custom —</option>
+          <option value="female" selected>Female tanpura (G#, L 0.85 m)</option>
+          <option value="male">Male tanpura (C#, L 1.00 m)</option>
+          <option value="tambori">Tambori (G#, L 0.70 m)</option>
+        </select></div>
+      <div class="row"><label>Sa (scale / pitch)</label><select id="pc"></select></div>
+      <div class="row"><label>Octave of middle Sa</label>
+        <select id="oct"><option>2</option><option selected>3</option><option>4</option></select></div>
+      <div class="row"><label>Reference A4 (Hz)</label><input type="number" id="a4" value="440" step="0.5"></div>
+      <div class="row"><label>Fine tune (cents)</label><input type="number" id="cents" value="0" step="1"></div>
+      <div class="row"><label>1st string tuned to</label>
+        <select id="first">
+          <option value="0.75" selected>Pa (mandra)</option>
+          <option value="0.666667">Ma (mandra)</option>
+          <option value="0.9375">Ni (mandra)</option>
+          <option value="0.9">Komal Ni (mandra)</option>
+          <option value="0.5">Sa (kharaj)</option>
+        </select></div>
+      <div class="row"><label>Vibrating length L (m)</label><input type="number" id="L" value="0.85" step="0.01" min="0.3" max="1.4"></div>
+      <div class="row"><label>Sa frequency</label><span class="val" id="saHz"></span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Strings</h2>
+      <table class="strings">
+        <thead><tr><th></th><th>Material</th><th>⌀ mm</th><th>ΔT %</th><th>Gain</th></tr></thead>
+        <tbody id="stringRows"></tbody>
+      </table>
+      <table style="margin-top:8px">
+        <thead><tr><th>String</th><th>f (Hz)</th><th>μ (g/m)</th><th>T (N)</th><th>% break</th><th>B</th></tr></thead>
+        <tbody id="physRows"></tbody>
+      </table>
+      <p class="hint">Tension is the value needed to reach the selected pitch (T = μ(2Lf)²). ΔT changes it, which detunes the string (f ∝ √T) and changes the inharmonicity B = π³Ed⁴ / (64TL²). Small ΔT differences between the two Sa strings give the natural beating.</p>
+      <div class="row"><label>Young's modulus override (GPa)</label><input type="number" id="Eover" value="" placeholder="from material" step="5"></div>
+      <div class="row"><label>Max dispersion all-pass sections</label><input type="number" id="dispM" value="64" min="0" max="96" step="1"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Jawari bridge &amp; thread</h2>
+      <label class="chk"><input type="checkbox" id="jawari" checked> Enable jawari contact (untick for an ideal rigid bridge)</label>
+      <div class="row"><label>Bridge profile</label>
+        <select id="shape">
+          <option value="3">Open / khula (flat, p = 3)</option>
+          <option value="2" selected>Classic parabolic (p = 2)</option>
+          <option value="1.4">Closed / band (steep, p = 1.4)</option>
+          <option value="custom">Custom exponent</option>
+        </select></div>
+      <div class="row"><label>Profile exponent p</label><input type="number" id="pexp" value="2" step="0.1" min="1" max="5" disabled></div>
+      <div class="row"><label>Bridge length along string (mm)</label><input type="number" id="blen" value="30" step="1" min="4" max="50"></div>
+      <div class="row"><label>Surface drop at far end (mm)</label><input type="number" id="depth" value="0.45" step="0.01" min="0.02" max="3"></div>
+      <div class="row"><label>Thread position (mm from edge)</label><input type="number" id="tpos" value="19" step="0.5" min="0.5" max="50"></div>
+      <div class="row"><label>Thread thickness (mm)</label><input type="number" id="tthick" value="0.20" step="0.005" min="0" max="1"></div>
+      <div class="row"><label>Contact restitution ε (0–1)</label><input type="number" id="rest" value="0.9" step="0.05" min="0" max="1"></div>
+      <div class="row"><label>Natural gap at thread / lift</label><span class="val" id="jawGap"></span></div>
+      <div class="row"><label>Est. contact zone (Sa string)</label><span class="val" id="jawZone"></span></div>
+      <p class="hint">Without a thread, the string leaves the bridge tangentially at its back edge (x = 0), and the bridge surface falls away by g<sub>s</sub>(x) = drop·(x/length)<sup>p</sup>. The thread lifts the string only by <b>e = thickness − g<sub>s</sub>(thread position)</b>, pivoting at the edge. The jawari "opens" when e is close to 0, because the string then grazes the bridge over several millimetres. That is why tiny thread movements matter so much. A larger e means less contact, a cleaner and duller tone, and eventually a sitar-like click or no buzz at all. A flatter profile (larger p) widens the grazing zone. Restitution ε = 1 is a lossless (elastic) contact and ε = 0 a fully absorbing one.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Pluck &amp; damping</h2>
+      <div class="row"><label>Pluck cycle (s)</label><input type="number" id="cycle" value="4.4" step="0.1" min="1" max="12"></div>
+      <div class="row"><label>Pattern</label>
+        <select id="pattern"><option value="trad" selected>Traditional (P · S S · S̱ · pause)</option><option value="even">Even</option></select></div>
+      <div class="row"><label>Render duration (s)</label><input type="number" id="dur" value="12" step="1" min="2" max="40"></div>
+      <div class="row"><label>Pluck position (fraction of L from bridge)</label><input type="number" id="ppos" value="0.55" step="0.01" min="0.05" max="0.95"></div>
+      <div class="row"><label>Finger width (mm)</label><input type="number" id="fw" value="12" step="1" min="1" max="40"></div>
+      <div class="row"><label>Pluck amplitude (mm)</label><input type="number" id="amp" value="1.5" step="0.1" min="0.05" max="4"></div>
+      <div class="row"><label>Finger damping at re-pluck (%)</label><input type="number" id="damp" value="85" step="5" min="0" max="100"></div>
+      <div class="row"><label>Humanize (%)</label><input type="number" id="human" value="5" step="1" min="0" max="30"></div>
+      <div class="row"><label>T60 at fundamental (s)</label><input type="number" id="t60lo" value="14" step="0.5" min="0.5" max="60"></div>
+      <div class="row"><label>T60 at 4 kHz (s)</label><input type="number" id="t60hi" value="2.0" step="0.1" min="0.05" max="60"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Body (gourd / tabli)</h2>
+      <div class="row"><label>Resonator</label>
+        <select id="gourd">
+          <option value="pumpkin" selected>Traditional pumpkin gourd</option>
+          <option value="fiberglass">Fiberglass gourd</option>
+          <option value="wooden">All-wooden body</option>
+          <option value="tambori">Tambori (small body)</option>
+          <option value="removed">Gourd removed (tabli only)</option>
+          <option value="none">None (raw bridge force)</option>
+        </select></div>
+      <div class="row"><label>Body size scale</label><input type="number" id="bsize" value="1.0" step="0.05" min="0.5" max="2"></div>
+      <div class="row"><label>Body mix (%)</label><input type="number" id="bmix" value="70" step="5" min="0" max="100"></div>
+      <p class="hint">The body mode frequencies, Q values and gains are illustrative, not measurements. To match a specific instrument, replace them with modes measured on it (for example from a tap test) in <code>GOURDS</code> in the source.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Engine</h2>
+      <div class="row"><label>Output sample rate</label><select id="fs"><option>44100</option><option selected>48000</option></select></div>
+      <div class="row"><label>Oversampling</label><select id="os"><option>2</option><option selected>4</option><option>8</option></select></div>
+      <p class="hint">Oversampling sets the spatial resolution Δx on the bridge. At 4× the contact zone gets about 10–30 waveguide points. Use 8× for the finest bridge detail, at the cost of a slower render.</p>
+    </div>
+  </div>
+
+  <!-- ================= OUTPUT ================= -->
+  <div>
+    <div class="panel">
+      <div class="buttons">
+        <button class="primary" id="btnRender">Render &amp; play</button>
+        <button id="btnPlay" disabled>Play</button>
+        <label class="chk"><input type="checkbox" id="loop"> Loop</label>
+        <button id="btnWav" disabled>Download WAV</button>
+        <button id="btnRef" disabled>Save as reference</button>
+        <button id="btnClearRef" disabled>Clear reference</button>
+        <div class="progress"><div id="prog"></div></div>
+      </div>
+      <div class="status" id="status" style="margin-top:6px">Set the parameters, then click Render &amp; play.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Averaged spectrum (Welch, 16k-point Hann, 50% overlap)</h2>
+      <div class="legend" id="specLegend"></div>
+      <div class="chart" id="specWrap">
+        <canvas id="spec" height="340"></canvas>
+        <div class="tooltip" id="specTip"></div>
+      </div>
+      <p class="hint">Ticks along the top mark the harmonics of the low (kharaj) Sa. Levels are relative because every render is normalised to the same peak, so compare spectral shapes, not absolute dB.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Spectrogram (0–8 kHz, log frequency)</h2>
+      <div class="chart" id="sgWrap">
+        <canvas id="sg" height="300"></canvas>
+        <div class="playhead" id="playhead"></div>
+        <div class="tooltip" id="sgTip"></div>
+      </div>
+      <p class="hint">The jawari shows up as a band of strong overtones that sweeps downward through each note's decay. This is the "formant sweep" that gives the tanpura its live, shimmering sound. Turn the jawari off to hear and see it disappear.</p>
+    </div>
+
+    <div class="panel">
+      <details id="tableDetails" open>
+        <summary>Harmonic table: harmonics of low Sa (peak level within ±2.5%)</summary>
+        <div id="harmTable" style="margin-top:8px"></div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details>
+        <summary>Model details per string (last render)</summary>
+        <div id="modelInfo" style="margin-top:8px"></div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- =====================================================================
+     SYNTHESIS ENGINE (runs in a Web Worker; plain JS, no DOM access)
+     ===================================================================== -->
+<script id="synth-src" type="text/plain">
+"use strict";
+
+// Illustrative body modes: [frequency Hz, Q, gain]
+const GOURDS = {
+  pumpkin:    { dry: 0.30, modes: [[105,7,1.0],[185,11,0.85],[280,14,0.7],[410,16,0.6],[600,18,0.5],[870,20,0.42],[1240,22,0.32],[1780,24,0.25],[2550,24,0.18],[3650,24,0.12],[5200,20,0.07]] },
+  fiberglass: { dry: 0.25, modes: [[118,12,0.9],[205,18,0.9],[310,22,0.8],[455,25,0.7],[660,28,0.6],[960,30,0.5],[1380,32,0.42],[1980,32,0.34],[2850,30,0.26],[4100,28,0.18],[5800,24,0.1]] },
+  wooden:     { dry: 0.30, modes: [[98,8,0.9],[175,12,0.85],[265,15,0.72],[390,17,0.62],[570,19,0.52],[830,21,0.42],[1190,23,0.32],[1700,24,0.24],[2450,24,0.16],[3500,22,0.1]] },
+  tambori:    { dry: 0.35, modes: [[150,8,0.6],[250,12,0.8],[375,15,0.75],[550,17,0.65],[800,19,0.55],[1150,21,0.45],[1650,23,0.35],[2400,24,0.26],[3400,24,0.18],[4900,22,0.1]] },
+  removed:    { dry: 0.60, modes: [[230,9,0.45],[400,12,0.4],[640,14,0.35],[980,16,0.3],[1450,18,0.24],[2150,20,0.18],[3200,20,0.12]] },
+  none:       { dry: 1.0,  modes: [] }
+};
+
+function jawariLift(P) {
+  const gs = P.depth * Math.pow(Math.min(P.tpos / P.blen, 1), P.pexp);
+  return Math.max(0, P.tthick - gs);
+}
+function onePoleDelay(c, w) { return Math.atan2(c * Math.sin(w), 1 - c * Math.cos(w)) / w; }
+function apDelay(a, w) { return 1 - 2 * Math.atan2(a * Math.sin(w), 1 + a * Math.cos(w)) / w; }
+
+function makeString(s, P, fsI, rng) {
+  const mu = s.rho * Math.PI * s.d * s.d / 4;
+  const Tnom = mu * Math.pow(2 * s.L * s.f0, 2);
+  const T = Tnom * (1 + s.dev / 100);
+  const f = s.f0 * Math.sqrt(1 + s.dev / 100);
+  const B = Math.pow(Math.PI, 3) * s.E * Math.pow(s.d, 4) / (64 * T * s.L * s.L);
+  const f1 = f * Math.sqrt(1 + B);           // stiff-string fundamental
+  const Pd = fsI / f1;                        // required loop delay (samples)
+  const w1 = 2 * Math.PI * f1 / fsI;
+
+  // ---- frequency-dependent loss: one-pole g(1-c)/(1-c z^-1) matched to T60(f0), T60(4 kHz)
+  const Glo = Math.pow(10, -3 / (P.t60lo * f1));
+  const Ghi = Math.pow(10, -3 / (Math.min(P.t60hi, P.t60lo) * f1));
+  let r = Math.min(Ghi / Glo, 0.9999999);
+  const wh = 2 * Math.PI * 4000 / fsI, r2 = r * r, A = 1 - r2, Bq = 1 - r2 * Math.cos(wh);
+  const c = A > 1e-12 ? (Bq - Math.sqrt(Math.max(0, Bq * Bq - A * A))) / A : 0;
+  const g = Glo;
+
+  // ---- dispersion: M identical first-order all-passes, coefficient fitted to the
+  //      stiff-string partial series f_n = n f sqrt(1 + B n^2) by least squares
+  //      The number of sections is chosen automatically (1..dispM) as the smallest
+  //      that fits the partial delays to within 0.5 sample RMS (else the best found).
+  let M = 0, aD = 0, dispErr = 0;
+  if (B > 1e-9 && P.dispM > 0) {
+    const fmax = Math.min(6000, 0.45 * P.fs);
+    const K = Math.max(2, Math.min(50, Math.floor(fmax / f1)));
+    const tg = [], ws = [];
+    for (let n = 2; n <= K; n++) {
+      const fn = n * f * Math.sqrt(1 + B * n * n);
+      tg.push(n * fsI / fn - fsI / f1); ws.push(2 * Math.PI * fn / fsI);
+    }
+    const fit = m => {
+      const err = a => { const d1 = apDelay(a, w1); let e = 0;
+        for (let i = 0; i < tg.length; i++) { const v = m * (apDelay(a, ws[i]) - d1) - tg[i]; e += v * v; } return e; };
+      let lo = -0.985, hi = 0, gr = 0.6180339887;
+      let x1 = hi - gr * (hi - lo), x2 = lo + gr * (hi - lo), e1 = err(x1), e2 = err(x2);
+      for (let it = 0; it < 80; it++) {
+        if (e1 < e2) { hi = x2; x2 = x1; e2 = e1; x1 = hi - gr * (hi - lo); e1 = err(x1); }
+        else { lo = x1; x1 = x2; e1 = e2; x2 = lo + gr * (hi - lo); e2 = err(x2); }
+      }
+      const a = (lo + hi) / 2; return { a, e: Math.sqrt(err(a) / tg.length) };
+    };
+    let best = null;
+    for (let m = 1; m <= P.dispM; m++) {
+      const r = fit(m);
+      if (!best || r.e < best.e) best = { m, a: r.a, e: r.e };
+      if (r.e < 0.5) break;
+    }
+    M = best.m; aD = best.a; dispErr = best.e;
+  }
+
+  // ---- tuning: integer delay lines + first-order Thiran fractional delay
+  const dLoss = onePoleDelay(c, w1), dAp = M * apDelay(aD, w1);
+  const Drem = Pd - dLoss - dAp;
+  const N = Math.floor((Drem - 0.5) / 2);
+  const dfrac = Drem - 2 * N;
+  const aT = (1 - dfrac) / (1 + dfrac);
+  const dx = s.L / (Pd / 2);                 // spatial step (m)
+
+  // ---- jawari barrier (one-sided obstacle under the string near the bridge end)
+  //      Without a thread the string leaves the bridge tangentially at x = 0 and the
+  //      bridge falls away as gs(x) = depth*(x/len)^p. A thread of thickness t at x_t
+  //      lifts the string by e = max(0, t - gs(x_t)), pivoting at x = 0.
+  let Kb = 0, bar = new Float64Array(1);
+  if (P.jawari) {
+    Kb = Math.max(1, Math.min(N - 4, Math.round(P.blen / dx)));
+    bar = new Float64Array(Kb + 1);
+    const e = jawariLift(P);
+    for (let k = 1; k <= Kb; k++) {
+      const x = k * dx;
+      bar[k] = -(P.depth * Math.pow(x / P.blen, P.pexp) + e * Math.min(x / P.tpos, 1));
+    }
+  }
+
+  // ---- pluck shape: triangle at pluck point, smoothed by finger width
+  const kp = Math.max(2, Math.min(N - 2, Math.round(P.ppos * N)));
+  const tri = new Float64Array(N);
+  for (let k = 0; k < N; k++) tri[k] = k <= kp ? k / kp : (N - k) / (N - kp);
+  const wk = Math.max(1, Math.round(P.fw / dx));
+  const shape = new Float64Array(N), pre = new Float64Array(N + 1);
+  for (let k = 0; k < N; k++) pre[k + 1] = pre[k] + tri[k];
+  let mx = 0;
+  for (let k = 0; k < N; k++) {
+    const a = Math.max(0, k - (wk >> 1)), b = Math.min(N, k + (wk >> 1) + 1);
+    shape[k] = (pre[b] - pre[a]) / (b - a); if (shape[k] > mx) mx = shape[k];
+  }
+  for (let k = 0; k < N; k++) shape[k] *= P.amp / mx;
+  shape[0] = 0;
+
+  // ---- pluck schedule
+  const plucks = [];
+  for (let t = s.offset; t < P.duration - 0.05; t += P.cycle) {
+    const jit = (rng() - 0.5) * 0.02 * P.human / 5;
+    plucks.push({ n: Math.max(0, Math.round((t + jit) * fsI)), a: 1 + (rng() - 0.5) * 2 * P.human / 100 });
+  }
+
+  const Rb = new Float64Array(N), Lb = new Float64Array(N);
+  const apx = new Float64Array(M), apy = new Float64Array(M);
+  const st = {
+    N, Rb, Lb, p: 0, ly: 0, thx: 0, thy: 0, gain: s.gain, T, dx, Kb, bar, plucks, pi: 0,
+    info: { name: s.name, f: f1, T, B, N, dfrac, dx: dx * 1000, Kb, M, aD, dispErr, c, g, plucks: plucks.length }
+  };
+  const g1c = g * (1 - c), keep = 1 - P.damp, hRest = 0.5 * (1 + P.rest);
+
+  st.tick = function (n) {
+    if (st.pi < plucks.length && n === plucks[st.pi].n) {
+      const a = plucks[st.pi++].a;
+      for (let k = 0; k < N; k++) {
+        const ri = (st.p - k + N) % N, li = (st.p + k) % N, h = 0.5 * a * shape[k];
+        Rb[ri] = Rb[ri] * keep + h; Lb[li] = Lb[li] * keep + h;
+      }
+      st.ly *= keep; st.thx *= keep; st.thy *= keep;
+      for (let i = 0; i < M; i++) { apx[i] *= keep; apy[i] *= keep; }
+    }
+    const p = st.p, p1 = p + 1 === N ? 0 : p + 1;
+    const outNut = Rb[p1];          // right-going wave arriving at the nut
+    const outBr = Lb[p];            // left-going wave arriving at the bridge edge
+    Rb[p1] = -outBr;                // rigid termination at the bridge edge
+    // nut end: loss -> dispersion -> fractional delay, inverting reflection
+    let x = -outNut;
+    let y = g1c * x + c * st.ly; st.ly = y; x = y;
+    for (let i = 0; i < M; i++) { y = aD * x + apx[i] - aD * apy[i]; apx[i] = x; apy[i] = y; x = y; }
+    y = aT * x + st.thx - aT * st.thy; st.thx = x; st.thy = y;
+    Lb[p] = y;
+    st.p = p1;
+
+    // jawari: where the string penetrates the barrier, point k acts as a rigid
+    // termination at height b for both travelling waves:
+    //   R' = b - L, L' = b - R  ->  y' = 2b - y   (elastic, restitution = 1)
+    // General: y' = b + eps*(b - y); the correction is split equally between the waves.
+    for (let k = 1; k <= Kb; k++) {
+      let ri = p1 - k; if (ri < 0) ri += N;
+      let li = p1 + k; if (li >= N) li -= N;
+      const yk = Rb[ri] + Lb[li];
+      if (yk < bar[k]) { const d = hRest * (bar[k] - yk); Rb[ri] += d; Lb[li] += d; }
+    }
+    // force transmitted to the bridge = tension x slope just beyond the contact zone
+    const k0 = Kb + 1;
+    let r0 = p1 - k0; if (r0 < 0) r0 += N;
+    let l0 = p1 + k0; if (l0 >= N) l0 -= N;
+    let r1i = r0 - 1; if (r1i < 0) r1i += N;
+    let l1i = l0 + 1; if (l1i >= N) l1i -= N;
+    const y0 = Rb[r0] + Lb[l0], y1 = Rb[r1i] + Lb[l1i];
+    return st.gain * st.T * (y1 - y0) / st.dx;
+  };
+  return st;
+}
+
+function biquadLP(fc, fs, Q) {
+  const w = 2 * Math.PI * fc / fs, cw = Math.cos(w), al = Math.sin(w) / (2 * Q), a0 = 1 + al;
+  return { b0: (1 - cw) / 2 / a0, b1: (1 - cw) / a0, b2: (1 - cw) / 2 / a0, a1: -2 * cw / a0, a2: (1 - al) / a0, z1: 0, z2: 0 };
+}
+function biquadBP(f, fs, Q) {
+  const w = 2 * Math.PI * f / fs, cw = Math.cos(w), al = Math.sin(w) / (2 * Q), a0 = 1 + al;
+  return { b0: al / a0, b1: 0, b2: -al / a0, a1: -2 * cw / a0, a2: (1 - al) / a0, z1: 0, z2: 0 };
+}
+function bq(f, x) { const y = f.b0 * x + f.z1; f.z1 = f.b1 * x - f.a1 * y + f.z2; f.z2 = f.b2 * x - f.a2 * y; return y; }
+
+function renderTanpura(P, onProgress) {
+  const t0 = Date.now();
+  const fs = P.fs, os = P.os, fsI = fs * os;
+  const nOut = Math.round(P.duration * fs), nI = nOut * os;
+  let seed = 12345;
+  const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const strs = P.strings.filter(s => s.enabled).map(s => makeString(s, P, fsI, rng));
+
+  const aa = os > 1 ? [0.5098, 0.6013, 0.9000, 2.5629].map(Q => biquadLP(0.45 * fs, fsI, Q)) : [];
+  const raw = new Float64Array(nOut);
+  const chunk = 1 << 16;
+  let o = 0;
+  for (let n = 0; n < nI; n++) {
+    let F = 0;
+    for (let i = 0; i < strs.length; i++) F += strs[i].tick(n);
+    for (let j = 0; j < aa.length; j++) F = bq(aa[j], F);
+    if ((n + 1) % os === 0) raw[o++] = F;
+    if ((n & (chunk - 1)) === 0 && onProgress) onProgress(n / nI);
+  }
+
+  // body resonator bank + DC blocker
+  const G = GOURDS[P.gourd] || GOURDS.none;
+  const res = G.modes.filter(m => m[0] / P.bsize < 0.45 * fs)
+    .map(m => ({ f: biquadBP(m[0] / P.bsize, fs, m[1]), g: m[2] }));
+  const mix = G.modes.length ? P.bmix : 0;
+  const out = new Float32Array(nOut);
+  const R = 1 - 2 * Math.PI * 30 / fs;
+  let xp = 0, yp = 0, peak = 1e-12;
+  for (let n = 0; n < nOut; n++) {
+    const x = raw[n];
+    let b = 0;
+    for (let i = 0; i < res.length; i++) b += res[i].g * bq(res[i].f, x);
+    let y = (1 - mix) * x + mix * (G.dry * x + 2.5 * b);
+    const h = y - xp + R * yp; xp = y; yp = h;
+    out[n] = h; const a = Math.abs(h); if (a > peak) peak = a;
+  }
+  const norm = 0.89 / peak;
+  for (let n = 0; n < nOut; n++) out[n] *= norm;
+  if (onProgress) onProgress(1);
+  return { audio: out, fs, info: strs.map(s => s.info), ms: Date.now() - t0 };
+}
+</script>
+
+<!-- =====================================================================
+     UI, ANALYSIS & CHARTS
+     ===================================================================== -->
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const MATERIALS = {
+  steel:  { label: 'Steel',  rho: 7850, E: 200e9, strength: 2.2e9 },
+  bronze: { label: 'Bronze', rho: 8800, E: 110e9, strength: 0.9e9 },
+  brass:  { label: 'Brass',  rho: 8500, E: 100e9, strength: 0.6e9 },
+  copper: { label: 'Copper', rho: 8960, E: 120e9, strength: 0.35e9 }
+};
+const STRINGS = [
+  { id: 's1', name: '1 · Pa', mat: 'steel',  d: 0.33, dev: 0,    gain: 1.0 },
+  { id: 's2', name: '2 · Sa', mat: 'steel',  d: 0.30, dev: 0,    gain: 1.0 },
+  { id: 's3', name: '3 · Sa', mat: 'steel',  d: 0.30, dev: 0.12, gain: 1.0 },
+  { id: 's4', name: '4 · S̱a', mat: 'bronze', d: 0.50, dev: 0,    gain: 1.0 }
+];
+const PATTERNS = { trad: [0, 0.27, 0.45, 0.63], even: [0, 0.25, 0.5, 0.75] };
+const PRESETS = {
+  female:  { pc: 8, oct: 3, L: 0.85, gourd: 'pumpkin', bsize: 1.0 },
+  male:    { pc: 1, oct: 3, L: 1.00, gourd: 'pumpkin', bsize: 1.1 },
+  tambori: { pc: 8, oct: 3, L: 0.70, gourd: 'tambori', bsize: 1.0 }
+};
+
+// ---------- build controls ----------
+NOTES.forEach((n, i) => { const o = document.createElement('option'); o.value = i; o.textContent = n; $('pc').appendChild(o); });
+$('pc').value = 8;
+const tb = $('stringRows');
+STRINGS.forEach(s => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><label class="chk"><input type="checkbox" id="${s.id}on" checked>${s.name}</label></td>
+    <td><select id="${s.id}mat">${Object.entries(MATERIALS).map(([k, m]) => `<option value="${k}" ${k === s.mat ? 'selected' : ''}>${m.label}</option>`).join('')}</select></td>
+    <td><input type="number" id="${s.id}d" value="${s.d}" step="0.01" min="0.1" max="1.2"></td>
+    <td><input type="number" id="${s.id}dev" value="${s.dev}" step="0.05"></td>
+    <td><input type="number" id="${s.id}g" value="${s.gain}" step="0.1" min="0" max="2"></td>`;
+  tb.appendChild(tr);
+});
+
+function saFreq() {
+  const midi = 12 * (+$('oct').value + 1) + +$('pc').value;
+  return +$('a4').value * Math.pow(2, (midi - 69) / 12) * Math.pow(2, +$('cents').value / 1200);
+}
+function noteName(f) {
+  const a4 = +$('a4').value || 440;
+  const m = 69 + 12 * Math.log2(f / a4), r = Math.round(m), c = Math.round((m - r) * 100);
+  return `${NOTES[((r % 12) + 12) % 12]}${Math.floor(r / 12) - 1}${c ? (c > 0 ? ' +' : ' ') + c + '¢' : ''}`;
+}
+
+function gather() {
+  const sa = saFreq(), L = +$('L').value, Eo = parseFloat($('Eover').value);
+  const ratios = [+$('first').value, 1, 1, 0.5];
+  const offs = PATTERNS[$('pattern').value], cycle = +$('cycle').value;
+  const strings = STRINGS.map((s, i) => {
+    const m = MATERIALS[$(s.id + 'mat').value];
+    return { name: s.name, enabled: $(s.id + 'on').checked, f0: sa * ratios[i], L,
+      d: +$(s.id + 'd').value / 1000, rho: m.rho, E: isFinite(Eo) ? Eo * 1e9 : m.E, strength: m.strength,
+      dev: +$(s.id + 'dev').value, gain: +$(s.id + 'g').value, offset: offs[i] * cycle };
+  });
+  const shp = $('shape').value;
+  return {
+    fs: +$('fs').value, os: +$('os').value, duration: +$('dur').value, cycle, strings,
+    dispM: Math.round(+$('dispM').value),
+    t60lo: +$('t60lo').value, t60hi: +$('t60hi').value,
+    jawari: $('jawari').checked, pexp: shp === 'custom' ? +$('pexp').value : +shp,
+    blen: +$('blen').value / 1000, depth: +$('depth').value / 1000,
+    tpos: Math.max(1e-4, +$('tpos').value / 1000), tthick: +$('tthick').value / 1000, rest: Math.max(0, Math.min(1, +$('rest').value)),
+    ppos: +$('ppos').value, fw: +$('fw').value / 1000, amp: +$('amp').value / 1000,
+    damp: +$('damp').value / 100, human: +$('human').value,
+    gourd: $('gourd').value, bsize: +$('bsize').value, bmix: +$('bmix').value / 100,
+    sa
+  };
+}
+
+function updatePhys() {
+  const P = gather();
+  $('saHz').textContent = `${P.sa.toFixed(2)} Hz (${noteName(P.sa)}) · low Sa ${(P.sa / 2).toFixed(2)} Hz`;
+  // jawari geometry readout (mirrors jawariLift in the engine)
+  const gsT = P.depth * Math.pow(Math.min(P.tpos / P.blen, 1), P.pexp), e = Math.max(0, P.tthick - gsT);
+  $('jawGap').textContent = `${(gsT * 1000).toFixed(3)} mm / ${(e * 1000).toFixed(3)} mm${P.tthick < gsT ? ' (thread loose)' : ''}`;
+  const slope = P.amp / (P.ppos * P.strings[1].L);   // peak string slope near the bridge after a pluck
+  let zone = 0;
+  for (let x = 1e-5; x <= P.blen; x += 1e-5) {
+    const gap = P.depth * Math.pow(x / P.blen, P.pexp) + e * Math.min(x / P.tpos, 1);
+    if (gap < slope * x) zone = x;
+  }
+  $('jawZone').textContent = !P.jawari ? 'jawari off' : zone > 0 ? `≈ 0 – ${(zone * 1000).toFixed(1)} mm` : 'no contact (too much lift)';
+  $('physRows').innerHTML = P.strings.map(s => {
+    const mu = s.rho * Math.PI * s.d * s.d / 4, T = mu * Math.pow(2 * s.L * s.f0, 2) * (1 + s.dev / 100);
+    const f = s.f0 * Math.sqrt(1 + s.dev / 100);
+    const B = Math.pow(Math.PI, 3) * s.E * Math.pow(s.d, 4) / (64 * T * s.L * s.L);
+    const brk = 100 * T / (s.strength * Math.PI * s.d * s.d / 4);
+    return `<tr><td>${s.name}</td><td>${f.toFixed(2)}</td><td>${(mu * 1000).toFixed(3)}</td><td>${T.toFixed(1)}</td>
+      <td class="${brk > 85 ? 'warn' : ''}">${brk.toFixed(0)}%${brk > 85 ? ' ⚠' : ''}</td><td>${B.toExponential(2)}</td></tr>`;
+  }).join('');
+}
+document.querySelectorAll('input,select').forEach(el => el.addEventListener('input', () => {
+  if (['pc', 'oct', 'L', 'gourd', 'bsize'].includes(el.id)) $('preset').value = 'custom';
+  if (el.id === 'shape') { $('pexp').disabled = el.value !== 'custom'; if (el.value !== 'custom') $('pexp').value = el.value; }
+  updatePhys();
+}));
+$('preset').addEventListener('change', () => {
+  const p = PRESETS[$('preset').value]; if (!p) return;
+  $('pc').value = p.pc; $('oct').value = p.oct; $('L').value = p.L; $('gourd').value = p.gourd; $('bsize').value = p.bsize;
+  updatePhys();
+});
+updatePhys();
+
+// ---------- engine (worker with main-thread fallback) ----------
+const SRC = $('synth-src').textContent;
+let worker = null;
+try {
+  const blob = new Blob([SRC + `
+self.onmessage = e => {
+  const r = renderTanpura(e.data, p => self.postMessage({ type: 'progress', p }));
+  self.postMessage({ type: 'done', r }, [r.audio.buffer]);
+};`], { type: 'text/javascript' });
+  worker = new Worker(URL.createObjectURL(blob));
+} catch (e) { worker = null; }
+const renderLocal = new Function(SRC + '\nreturn renderTanpura;')();
+
+function runRender(P) {
+  return new Promise((resolve, reject) => {
+    if (worker) {
+      worker.onmessage = e => {
+        if (e.data.type === 'progress') $('prog').style.width = (e.data.p * 100).toFixed(1) + '%';
+        else resolve(e.data.r);
+      };
+      worker.onerror = err => { worker = null; err.preventDefault(); runRender(P).then(resolve, reject); };
+      worker.postMessage(P);
+    } else {
+      setTimeout(() => { try { resolve(renderLocal(P, null)); } catch (e) { reject(e); } }, 30);
+    }
+  });
+}
+
+// ---------- audio ----------
+let actx = null, src = null, startedAt = 0, current = null, reference = null;
+function ensureCtx() { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); return actx; }
+function stop() { if (src) { try { src.stop(); } catch (e) {} src = null; } $('btnPlay').textContent = 'Play'; $('playhead').style.display = 'none'; }
+function play() {
+  if (!current) return;
+  const ctx = ensureCtx(); stop();
+  const buf = ctx.createBuffer(1, current.audio.length, current.fs);
+  buf.copyToChannel(current.audio, 0);
+  src = ctx.createBufferSource(); src.buffer = buf; src.loop = $('loop').checked;
+  src.connect(ctx.destination); src.start(); startedAt = ctx.currentTime;
+  src.onended = () => { if (!src || !src.loop) stop(); };
+  $('btnPlay').textContent = 'Stop';
+  requestAnimationFrame(tickPlayhead);
+}
+function tickPlayhead() {
+  if (!src || !current) return;
+  const dur = current.audio.length / current.fs;
+  let t = actx.currentTime - startedAt; if (src.loop) t %= dur;
+  if (t > dur) return;
+  const ph = $('playhead'), w = $('sg').clientWidth, pad = SG_PAD;
+  ph.style.display = 'block'; ph.style.left = (pad.l + (w - pad.l - pad.r) * t / dur) + 'px';
+  requestAnimationFrame(tickPlayhead);
+}
+$('btnPlay').onclick = () => src ? stop() : play();
+$('loop').onchange = () => { if (src) src.loop = $('loop').checked; };
+
+$('btnRender').onclick = async () => {
+  const P = gather();
+  if (!P.strings.some(s => s.enabled)) { $('status').textContent = 'Enable at least one string.'; return; }
+  ensureCtx(); stop();
+  $('btnRender').disabled = true; $('prog').style.width = '0%';
+  $('status').textContent = `Rendering ${P.duration}s at ${P.fs * P.os} Hz internal rate…`;
+  try {
+    const r = await runRender(P);
+    current = { ...r, P, label: describe(P) };
+    analyse(current);
+    $('status').textContent = `Rendered in ${(r.ms / 1000).toFixed(2)} s · ${describe(P)}`;
+    ['btnPlay', 'btnWav', 'btnRef'].forEach(id => $(id).disabled = false);
+    showInfo(r.info);
+    drawAll();
+    play();
+  } catch (e) {
+    $('status').textContent = 'Render failed: ' + e.message;
+  } finally { $('btnRender').disabled = false; }
+};
+function describe(P) {
+  const g = $('gourd').selectedOptions[0].textContent;
+  return `${NOTES[+$('pc').value]}${$('oct').value} · ${g} · jawari ${P.jawari ? `p=${P.pexp}, thread ${(P.tthick * 1000).toFixed(2)} mm @ ${(P.tpos * 1000).toFixed(1)} mm` : 'off'}`;
+}
+function showInfo(info) {
+  $('modelInfo').innerHTML = `<table><thead><tr><th>String</th><th>f₁ (Hz)</th><th>T (N)</th><th>B</th><th>Delay N</th><th>Frac</th><th>Δx (mm)</th><th>Bridge pts</th><th>All-pass M × a</th><th>Disp. fit RMS (samp.)</th><th>Loss g / c</th><th>Plucks</th></tr></thead><tbody>` +
+    info.map(i => `<tr><td>${i.name}</td><td>${i.f.toFixed(2)}</td><td>${i.T.toFixed(1)}</td><td>${i.B.toExponential(2)}</td><td>${i.N}</td><td>${i.dfrac.toFixed(3)}</td><td>${i.dx.toFixed(3)}</td><td>${i.Kb}</td><td>${i.M} × ${i.aD.toFixed(4)}</td><td>${i.dispErr.toFixed(3)}</td><td>${i.g.toFixed(6)} / ${i.c.toExponential(2)}</td><td>${i.plucks}</td></tr>`).join('') + '</tbody></table>';
+}
+
+$('btnWav').onclick = () => {
+  if (!current) return;
+  const a = current.audio, n = a.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, current.fs, true); v.setUint32(28, current.fs * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, a[i])) * 32767, true);
+  const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  const el = document.createElement('a'); el.href = url;
+  el.download = `tanpura_${NOTES[+$('pc').value].replace('#', 's')}${$('oct').value}_${current.P.gourd}.wav`;
+  el.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+};
+$('btnRef').onclick = () => { reference = { spec: current.spec, label: current.label, base: current.base }; $('btnClearRef').disabled = false; drawAll(); };
+$('btnClearRef').onclick = () => { reference = null; $('btnClearRef').disabled = true; drawAll(); };
+
+// ---------- analysis ----------
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+function hann(n) { const w = new Float64Array(n); for (let i = 0; i < n; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)); return w; }
+
+function analyse(cur) {
+  const x = cur.audio, fs = cur.fs;
+  // Welch
+  const nf = 16384, hop = nf / 2, w = hann(nf), ws = w.reduce((a, b) => a + b, 0);
+  const acc = new Float64Array(nf / 2 + 1); let cnt = 0;
+  const re = new Float64Array(nf), im = new Float64Array(nf);
+  for (let s = 0; s + nf <= x.length; s += hop) {
+    for (let i = 0; i < nf; i++) { re[i] = x[s + i] * w[i]; im[i] = 0; }
+    fft(re, im);
+    for (let k = 0; k <= nf / 2; k++) acc[k] += re[k] * re[k] + im[k] * im[k];
+    cnt++;
+  }
+  const db = new Float32Array(nf / 2 + 1);
+  for (let k = 0; k <= nf / 2; k++) db[k] = 10 * Math.log10(acc[k] / Math.max(cnt, 1) / (ws * ws / 4) + 1e-14);
+  cur.spec = { db, df: fs / nf };
+  cur.base = cur.P.sa / 2;
+  // STFT
+  const n2 = 2048, h2 = 256, w2 = hann(n2), fmaxBin = Math.ceil(8000 / (fs / n2));
+  const frames = Math.max(1, Math.floor((x.length - n2) / h2));
+  const sg = new Float32Array(frames * fmaxBin);
+  const r2 = new Float64Array(n2), i2 = new Float64Array(n2);
+  let mx = -1e9;
+  for (let f = 0; f < frames; f++) {
+    for (let i = 0; i < n2; i++) { r2[i] = x[f * h2 + i] * w2[i]; i2[i] = 0; }
+    fft(r2, i2);
+    for (let k = 0; k < fmaxBin; k++) { const v = 10 * Math.log10(r2[k] * r2[k] + i2[k] * i2[k] + 1e-14); sg[f * fmaxBin + k] = v; if (v > mx) mx = v; }
+  }
+  cur.sg = { data: sg, frames, bins: fmaxBin, df: fs / n2, hop: h2 / fs, max: mx };
+}
+
+// ---------- charts ----------
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SPEC_PAD = { l: 48, r: 14, t: 26, b: 34 }, SG_PAD = { l: 48, r: 14, t: 8, b: 30 };
+const SPEC_F = [30, 16000], SG_F = [50, 8000];
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = +cv.getAttribute('height');
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px';
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+const fmtHz = f => f >= 1000 ? (f / 1000) + 'k' : String(f);
+
+function specRange() {
+  let mx = -200;
+  const scan = s => { for (let k = 1; k < s.db.length; k++) { const f = k * s.df; if (f >= SPEC_F[0] && f <= SPEC_F[1] && s.db[k] > mx) mx = s.db[k]; } };
+  if (current) scan(current.spec); if (reference) scan(reference.spec);
+  if (mx < -199) return [-100, 0];
+  const top = Math.ceil((mx + 3) / 10) * 10;
+  return [top - 100, top];
+}
+
+function drawSpectrum() {
+  const cv = $('spec'), { ctx, w, h } = setupCanvas(cv), pad = SPEC_PAD;
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  ctx.fillStyle = css('--surface-1'); ctx.fillRect(0, 0, w, h);
+  const lf0 = Math.log10(SPEC_F[0]), lf1 = Math.log10(SPEC_F[1]);
+  const fx = f => pad.l + pw * (Math.log10(f) - lf0) / (lf1 - lf0);
+  const [d0, d1] = specRange(); const dy = d => pad.t + ph * (1 - (d - d0) / (d1 - d0));
+  ctx.font = '11px system-ui, sans-serif'; ctx.lineWidth = 1;
+  // grid
+  ctx.strokeStyle = css('--grid'); ctx.fillStyle = css('--text-muted');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  [50, 100, 200, 500, 1000, 2000, 5000, 10000].forEach(f => {
+    const x = Math.round(fx(f)) + 0.5; ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph); ctx.stroke();
+    ctx.fillText(fmtHz(f), x, pad.t + ph + 6);
+  });
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let d = d0; d <= d1; d += 10) {
+    const y = Math.round(dy(d)) + 0.5; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+    ctx.fillText(d + '', pad.l - 6, y);
+  }
+  ctx.fillStyle = css('--text-secondary'); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+  ctx.fillText('Frequency (Hz)', pad.l + pw / 2, h - 1);
+  ctx.save(); ctx.translate(11, pad.t + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textBaseline = 'middle'; ctx.fillText('Level (dB)', 0, 0); ctx.restore();
+  // harmonic ticks
+  const base = (current || reference) ? (current || reference).base : saFreq() / 2;
+  ctx.strokeStyle = css('--axis'); ctx.fillStyle = css('--text-muted'); ctx.textBaseline = 'bottom';
+  for (let n = 1; n * base <= SPEC_F[1]; n++) {
+    const x = Math.round(fx(n * base)) + 0.5; if (x < pad.l) continue;
+    ctx.beginPath(); ctx.moveTo(x, pad.t - 6); ctx.lineTo(x, pad.t); ctx.stroke();
+    if (n <= 8 || n === 12 || n === 16 || n === 24 || n === 32 || n === 48 || n === 64) ctx.fillText(n, x, pad.t - 8);
+  }
+  // series: per-pixel max envelope so dense high-frequency bins don't alias
+  const drawSeries = (s, color, dash) => {
+    ctx.strokeStyle = color; ctx.lineWidth = dash ? 1.5 : 1.25; ctx.setLineDash(dash ? [5, 3] : []);
+    ctx.beginPath(); let started = false;
+    for (let px = 0; px <= pw; px++) {
+      const fa = Math.pow(10, lf0 + (lf1 - lf0) * px / pw), fb = Math.pow(10, lf0 + (lf1 - lf0) * (px + 1) / pw);
+      let ka = fa / s.df, kb = fb / s.df, v;
+      if (kb - ka < 1) { const k = Math.floor(ka), t = ka - k; v = s.db[k] * (1 - t) + s.db[k + 1] * t; }
+      else { v = -300; for (let k = Math.floor(ka); k <= Math.ceil(kb); k++) if (s.db[k] > v) v = s.db[k]; }
+      const y = Math.max(pad.t, Math.min(pad.t + ph, dy(v)));
+      started ? ctx.lineTo(pad.l + px, y) : (ctx.moveTo(pad.l + px, y), started = true);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  if (reference) drawSeries(reference.spec, css('--series-2'), true);
+  if (current) drawSeries(current.spec, css('--series-1'), false);
+  if (!current && !reference) {
+    ctx.fillStyle = css('--text-muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Render to see the spectrum', pad.l + pw / 2, pad.t + ph / 2);
+  }
+  // legend
+  const lg = [];
+  if (current) lg.push(`<span style="--c:${css('--series-1')}">Current: ${current.label}</span>`);
+  if (reference) lg.push(`<span class="dashed" style="--c:${css('--series-2')}">Reference: ${reference.label}</span>`);
+  $('specLegend').innerHTML = (current && reference) ? lg.join('') : '';
+  cv._map = { fx, lf0, lf1, pad, pw, ph, dy, w, h };
+}
+function specAt(s, f) { const k = Math.round(f / s.df); let v = -300; for (let j = k - 1; j <= k + 1; j++) if (s.db[j] > v) v = s.db[j]; return v; }
+
+function specHover(e) {
+  const cv = $('spec'), m = cv._map, tip = $('specTip');
+  if (!m || !current) { tip.style.display = 'none'; return; }
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
+  if (x < m.pad.l || x > m.pad.l + m.pw) { tip.style.display = 'none'; drawSpectrum(); return; }
+  const f = Math.pow(10, m.lf0 + (m.lf1 - m.lf0) * (x - m.pad.l) / m.pw);
+  drawSpectrum();
+  const ctx = cv.getContext('2d');
+  ctx.strokeStyle = css('--text-muted'); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, m.pad.t); ctx.lineTo(x, m.pad.t + m.ph); ctx.stroke();
+  const mark = (s, col) => { const v = specAt(s, f), y = m.dy(v); if (y < m.pad.t || y > m.pad.t + m.ph) return;
+    ctx.fillStyle = col; ctx.strokeStyle = css('--surface-1'); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4, 0, 7); ctx.fill(); ctx.stroke(); };
+  if (reference) mark(reference.spec, css('--series-2'));
+  mark(current.spec, css('--series-1'));
+  const base = current.base, n = Math.round(f / base), near = n >= 1 && Math.abs(f / (n * base) - 1) < 0.03;
+  tip.innerHTML = `<div><b>${f.toFixed(f < 1000 ? 1 : 0)} Hz</b> <span class="k">${noteName(f)}${near ? ` · ≈ ${n} × low Sa` : ''}</span></div>
+    <div><span class="k">Current</span> ${specAt(current.spec, f).toFixed(1)} dB</div>
+    ${reference ? `<div><span class="k">Reference</span> ${specAt(reference.spec, f).toFixed(1)} dB</div>` : ''}`;
+  tip.style.display = 'block';
+  const tw = tip.offsetWidth; tip.style.left = (x + 14 + tw > m.w ? x - tw - 14 : x + 14) + 'px'; tip.style.top = (m.pad.t + 8) + 'px';
+}
+$('spec').addEventListener('mousemove', specHover);
+$('spec').addEventListener('mouseleave', () => { $('specTip').style.display = 'none'; drawSpectrum(); });
+
+function seqColors() { return css('--seq').split(',').map(h => [1, 3, 5].map(i => parseInt(h.trim().substr(i, 2), 16))); }
+function drawSpectrogram() {
+  const cv = $('sg'), { ctx, w, h } = setupCanvas(cv), pad = SG_PAD;
+  const pw = Math.max(1, Math.floor(w - pad.l - pad.r)), ph = h - pad.t - pad.b;
+  ctx.fillStyle = css('--surface-1'); ctx.fillRect(0, 0, w, h);
+  const lf0 = Math.log10(SG_F[0]), lf1 = Math.log10(SG_F[1]);
+  ctx.font = '11px system-ui, sans-serif';
+  if (current) {
+    const s = current.sg, dpr = window.devicePixelRatio || 1;
+    const iw = Math.round(pw * dpr), ih = Math.round(ph * dpr), img = ctx.createImageData(iw, ih);
+    const surf = css('--surface-1'), s0 = [1, 3, 5].map(i => parseInt(surf.substr(i, 2), 16));
+    const ramp = [s0, ...seqColors()], range = 70, lo = s.max - range;
+    const binOfRow = new Float32Array(ih);
+    for (let y = 0; y < ih; y++) binOfRow[y] = Math.pow(10, lf1 - (lf1 - lf0) * y / (ih - 1)) / s.df;
+    for (let x = 0; x < iw; x++) {
+      const fr = Math.min(s.frames - 1, Math.floor(x / iw * s.frames));
+      for (let y = 0; y < ih; y++) {
+        const b = binOfRow[y], k = Math.min(s.bins - 2, Math.floor(b)), t = b - k;
+        const v = s.data[fr * s.bins + k] * (1 - t) + s.data[fr * s.bins + k + 1] * t;
+        let u = Math.max(0, Math.min(1, (v - lo) / range)) * (ramp.length - 1);
+        const i0 = Math.min(ramp.length - 2, Math.floor(u)), ft = u - i0, c0 = ramp[i0], c1 = ramp[i0 + 1];
+        const o = (y * iw + x) * 4;
+        img.data[o] = c0[0] + (c1[0] - c0[0]) * ft; img.data[o + 1] = c0[1] + (c1[1] - c0[1]) * ft;
+        img.data[o + 2] = c0[2] + (c1[2] - c0[2]) * ft; img.data[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, Math.round(pad.l * dpr), Math.round(pad.t * dpr));
+  } else {
+    ctx.fillStyle = css('--text-muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Render to see the spectrogram', pad.l + pw / 2, pad.t + ph / 2);
+  }
+  // axes
+  ctx.fillStyle = css('--text-muted'); ctx.strokeStyle = css('--axis'); ctx.lineWidth = 1;
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  [100, 200, 500, 1000, 2000, 4000, 8000].forEach(f => {
+    const y = pad.t + ph * (lf1 - Math.log10(f)) / (lf1 - lf0);
+    ctx.beginPath(); ctx.moveTo(pad.l - 4, Math.round(y) + .5); ctx.lineTo(pad.l, Math.round(y) + .5); ctx.stroke();
+    ctx.fillText(fmtHz(f), pad.l - 6, y);
+  });
+  if (current) {
+    const dur = current.audio.length / current.fs, step = dur > 20 ? 5 : dur > 8 ? 2 : 1;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let t = 0; t <= dur; t += step) { const x = pad.l + pw * t / dur; ctx.fillText(t + ' s', x, pad.t + ph + 6); }
+  }
+  cv._map = { pad, pw, ph, lf0, lf1, w };
+}
+$('sg').addEventListener('mousemove', e => {
+  const cv = $('sg'), m = cv._map, tip = $('sgTip');
+  if (!m || !current) return;
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x < m.pad.l || x > m.pad.l + m.pw || y < m.pad.t || y > m.pad.t + m.ph) { tip.style.display = 'none'; return; }
+  const s = current.sg, dur = current.audio.length / current.fs, t = dur * (x - m.pad.l) / m.pw;
+  const f = Math.pow(10, m.lf1 - (m.lf1 - m.lf0) * (y - m.pad.t) / m.ph);
+  const fr = Math.min(s.frames - 1, Math.floor(t / dur * s.frames)), k = Math.min(s.bins - 1, Math.round(f / s.df));
+  tip.innerHTML = `<div><b>${t.toFixed(2)} s · ${f.toFixed(0)} Hz</b></div><div><span class="k">Level</span> ${(s.data[fr * s.bins + k] - s.max).toFixed(1)} dB re max</div>`;
+  tip.style.display = 'block'; const tw = tip.offsetWidth;
+  tip.style.left = (x + 14 + tw > m.w ? x - tw - 14 : x + 14) + 'px'; tip.style.top = (y + 10) + 'px';
+});
+$('sg').addEventListener('mouseleave', () => $('sgTip').style.display = 'none');
+
+function drawTable() {
+  if (!current) { $('harmTable').innerHTML = '<span class="hint">Render to fill this table.</span>'; return; }
+  const base = current.base, peak = (s, f) => { const k0 = Math.floor(f * 0.975 / s.df), k1 = Math.ceil(f * 1.025 / s.df); let v = -300; for (let k = k0; k <= k1; k++) if (s.db[k] > v) v = s.db[k]; return v; };
+  const ref0 = peak(current.spec, base * 2);
+  let rows = '';
+  for (let n = 1; n <= 32 && n * base < 16000; n++) {
+    const f = n * base, c = peak(current.spec, f), r = reference ? peak(reference.spec, f) : null;
+    rows += `<tr><td>${n}</td><td>${f.toFixed(1)}</td><td>${noteName(f)}</td><td>${c.toFixed(1)}</td><td>${(c - ref0).toFixed(1)}</td>${reference ? `<td>${r.toFixed(1)}</td><td>${(c - r >= 0 ? '+' : '') + (c - r).toFixed(1)}</td>` : ''}</tr>`;
+  }
+  $('harmTable').innerHTML = `<table><thead><tr><th>n</th><th>Freq (Hz)</th><th>Note</th><th>Current (dB)</th><th>re Sa (dB)</th>${reference ? '<th>Reference (dB)</th><th>Δ cur − ref</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function drawAll() { drawSpectrum(); drawSpectrogram(); drawTable(); }
+window.addEventListener('resize', drawAll);
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+drawAll();
+</script>
+</body>
+</html>
